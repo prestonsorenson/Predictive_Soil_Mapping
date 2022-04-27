@@ -22,21 +22,25 @@ psm_ranger_feature_selection <- function (x, y){
   #forward feature selection
   bare_soil_var=names(sort(importance(model_temp_bare_soil), decreasing=TRUE))
   bare_soil_var=c(x, bare_soil_var)
+  
   val=vector('list')
+  bs_feature=vector('list')
+  q=0
   for (i in 2:length(bare_soil_var)){
-    temp=data_temp[,bare_soil_var[1:i]]
+    q=q+1
+    temp=data_temp[,bare_soil_var]
     model=ranger(dependent.variable.name = x, data=temp, importance='impurity')
     val=c(val, model$prediction.error)
+    bs_feature[[q]]=bare_soil_var
+    bare_soil_var=c(x, names(sort(importance(model), decreasing=TRUE))[-length(sort(importance(model), decreasing=TRUE))])
     rm(model)
   }
   val_bare_soil=unlist(val)
-  val_bare_soil=data.frame(bare_soil_var[-1], val_bare_soil)
-  a=1:nrow(val_bare_soil)
-  plot(val_bare_soil$val_bare_soil~a)
-  val_bare_soil
-  which.min(val_bare_soil$val_bare_soil)
+  which.min(val_bare_soil)
   
-  bare_soil_var=bare_soil_var[2:(which.min(val_bare_soil$val_bare_soil)+1)]
+  bare_soil_var=unlist(bs_feature[which.min(val)])[-1]
+  
+  
   
   #band ratios
   data_temp=y[,c(x,'ari','ari_noBareSoil','CRSI','CRSI_noBareSoil','NDVI_July_Aug','NDVI_July_Aug_noBareSoil','NDVI_Sept_Oct','NDVI_Sept_Oct_noBareSoil','NDVI_SD','SAVI_Jul_Aug','SAVI_Jul_Aug_noBareSoil','precip','temperature')]
@@ -47,21 +51,25 @@ psm_ranger_feature_selection <- function (x, y){
   #forward feature selection
   band_ratios_var=names(sort(importance(model_temp_band_ratios), decreasing=TRUE))
   band_ratios_var=c(x, band_ratios_var)
+  
+  
   val=vector('list')
+  band_ratios_feature=vector('list')
+  q=0
   for (i in 2:length(band_ratios_var)){
-    temp=data_temp[,band_ratios_var[1:i]]
+    q=q+1
+    temp=data_temp[,band_ratios_var]
     model=ranger(dependent.variable.name = x, data=temp, importance='impurity')
     val=c(val, model$prediction.error)
+    band_ratios_feature[[q]]=band_ratios_var
+    band_ratios_var=c(x, names(sort(importance(model), decreasing=TRUE))[-length(sort(importance(model), decreasing=TRUE))])
     rm(model)
   }
   val_band_ratios=unlist(val)
-  val_band_ratios=data.frame(band_ratios_var[-1], val_band_ratios)
-  a=1:nrow(val_band_ratios)
-  plot(val_band_ratios$val_band_ratios~a)
-  val_band_ratios
-  which.min(val_band_ratios$val_band_ratios)
+  which.min(val_band_ratios)
   
-  band_ratios_var=band_ratios_var[2:(which.min(val_band_ratios$val_band_ratios)+1)]
+  band_ratios_var=unlist(band_ratios_feature[which.min(val)])[-1]
+  
   
   #terrain attributes
   data_temp=y[,c(x,'precip', 'temperature','dem_3x3_sd3x3','dem_3x3_sd5x5','dem_3x3_sd9x9','dem_3x3_sd21x21','dem_9x9_sd21x21','dem_9x9_sd101x101','dem_3x3_tri','dem_5x5_tri','dem_9x9_tri','dem_9x9_tri_20', 'MidSlope_Pos_100m', 'Norm_Height_100m', 'Slope_Height_100m', 'Stand_Height_100m', 'SWI_100m', 'Valley_Depth_100m')]
@@ -72,27 +80,38 @@ psm_ranger_feature_selection <- function (x, y){
   #forward feature selection
   terrain_var=names(sort(importance(model_temp_terrain), decreasing=TRUE))
   terrain_var=c(x, terrain_var)
+  
   val=vector('list')
+  terrain_feature=vector('list')
+  q=0
   for (i in 2:length(terrain_var)){
-    temp=data_temp[,terrain_var[1:i]]
+    q=q+1
+    temp=data_temp[,terrain_var]
     model=ranger(dependent.variable.name = x, data=temp, importance='impurity')
     val=c(val, model$prediction.error)
+    terrain_feature[[q]]=terrain_var
+    terrain_var=c(x, names(sort(importance(model), decreasing=TRUE))[-length(sort(importance(model), decreasing=TRUE))])
     rm(model)
   }
   val_terrain=unlist(val)
-  val_terrain=data.frame(terrain_var[-1], val_terrain)
-  a=1:nrow(val_terrain)
-  plot(val_terrain$val_terrain~a)
-  val_terrain
-  which.min(val_terrain$val_terrain)
+  which.min(val_terrain)
   
-  terrain_var=terrain_var[2:(which.min(val_terrain$val_terrain)+1)]
+  terrain_var=unlist(terrain_feature[which.min(val)])[-1]
   
   #final features
   temp_init_var=c(x, bare_soil_var, band_ratios_var, terrain_var)
   temp_init_var=temp_init_var[!duplicated(temp_init_var)]
   
   var_train_a_init=y[,temp_init_var]
+  
+  #remove correlated features
+  var_cor=findCorrelation(cor(var_train_a_init[,-1]), cutoff=0.9)
+  var_cor
+  var_cor=var_cor+1
+  
+  var_train_a_init=var_train_a_init[,-var_cor]
+  
+  
   
   model_temp_final=ranger(dependent.variable.name = x, data=var_train_a_init, importance='impurity')
   model_temp_final
@@ -102,21 +121,23 @@ psm_ranger_feature_selection <- function (x, y){
   final_var=names(sort(importance(model_temp_final), decreasing=TRUE))
   final_var=c(x, final_var)
   val=vector('list')
+  final_feature=vector('list')
+  q=0
   for (i in 2:length(final_var)){
-    temp=var_train_a_init[,final_var[1:i]]
+    q=q+1
+    temp=y[,final_var]
     model=ranger(dependent.variable.name = x, data=temp, importance='impurity')
     val=c(val, model$prediction.error)
+    final_feature[[q]]=final_var
+    final_var=c(x, names(sort(importance(model), decreasing=TRUE))[-length(sort(importance(model), decreasing=TRUE))])
     rm(model)
   }
   val_final=unlist(val)
-  val_final=data.frame(final_var[-1], val_final)
-  a=1:nrow(val_final)
-  plot(val_final$val_final~a)
-  val_final
-  which.min(val_final$val_final)
+  which.min(val_final)
   
-  final_var=final_var[2:(which.min(val_final$val_final)+1)]
+  final_var=unlist(final_feature[which.min(val)])[-1]
   final_var=c(x, final_var)
+  
   return(final_var)
 }
 
