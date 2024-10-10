@@ -1,0 +1,34 @@
+library(terra)
+library(parallel)
+library(ranger)
+
+#combine all your rasters into a single spatraster
+#then use terra's wrap function to make it serializable
+rasters_w=wrap(rasters)
+
+#set number of cores
+cls <- parallel::makeCluster(48, outfile="")
+#export objects and libraries needed for predictions
+parallel::clusterExport(cls, c('ranger', 'model_ranger', 'rasters_w'))
+start=proc.time()
+
+#set function for mclapply
+#function interates across tiles
+f <- function (j){
+    try({
+    rasters_uw=unwrap(rasters_w)
+    rasters_sub=crop(rasters_uw, tiles[j,])
+    rasters_sub=subst(rasters_sub, NA, 0)
+    pred_ranger=terra::predict(rasters_sub, model_ranger)
+    pred_ranger=expm1(pred_ranger)
+    pred_ranger=pred_ranger[[1]]
+    writeRaster(pred_ranger, paste('pred_soc',"_", j, '.tif', sep=""), overwrite=TRUE)
+    })
+}
+
+#run mclapply with row numbers for tiles specified, and f being the function to ru n
+mclapply(1:nrow(tiles), f)
+
+#return processing time and stop cluster
+proc.time()-start
+parallel::stopCluster(cls)
