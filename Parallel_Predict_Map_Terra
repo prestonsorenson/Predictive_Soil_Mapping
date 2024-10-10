@@ -16,12 +16,19 @@ start=proc.time()
 #function interates across tiles
 f <- function (j){
     try({
+    #unwrap raster pack
     rasters_uw=unwrap(rasters_w)
+    #crop to tile
     rasters_sub=crop(rasters_uw, tiles[j,])
+    #replace NA values with 0, this might not be needed depending on how you trained model
     rasters_sub=subst(rasters_sub, NA, 0)
+    #predict values, the output is a spatraster
     pred_ranger=terra::predict(rasters_sub, model_ranger)
+    #this function is to backtransform log transformed data
     pred_ranger=expm1(pred_ranger)
+    #ranger package export multiple bands, the first one is the predictions
     pred_ranger=pred_ranger[[1]]
+    #write raster to drive
     writeRaster(pred_ranger, paste('pred_soc',"_", j, '.tif', sep=""), overwrite=TRUE)
     })
 }
