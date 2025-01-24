@@ -1,0 +1,384 @@
+####Script Prepared by Jeremy Kiss#####
+
+#load library
+library(RSAGA)
+library(raster)
+library(svMisc)
+
+tiles=shapefile('/media/preston/GVI2017/Saskatchewan/Tiles/north_sk_tiles_buffered.shp')
+
+
+#Set connection between RStudio and SAGA 
+#work_env <- rsaga.env(path = "C:/Program Files (x86)/SAGA-GIS/")
+
+for (i in 1:length(tiles)){
+progress(i, max.value=length(tiles))
+#set work directory
+try({
+drive=paste('/media/preston/GVI2017/Saskatchewan/north_sk_elevation/Terrain/',i, sep="")
+
+setwd(drive)
+
+
+
+#create directories for specific output file types
+dir.create("SGRDS")
+dir.create("TIFFS")
+
+# specify DEM to use 
+dem1=paste('/media/preston/GVI2017/Saskatchewan/north_sk_elevation/Terrain/',i,'/sk_elevation_',i,'.tif', sep="")
+
+dem.filepath <- dem1
+
+##set output location as a named object
+output.directory <-  paste(drive, "/SGRDS", sep="")
+
+#specify DEM sgrd file path -(output, not created yet)
+dem.sgrd.filepath <- paste0(output.directory,"dem.sgrd")
+
+
+#specify resolution
+#resolution is needed to calculate MRVBF 
+#load dem raster
+library(raster)
+dem.raster <- raster(dem.filepath)
+
+# get the resolution of dem
+res.vector <- res(dem.raster)
+
+#don't want as vector 
+res <- res.vector[1]
+
+#remove raster
+rm(dem.raster)
+
+
+
+
+
+
+###LOOK UP SAGA MODULES____________________________________________________________________________________________
+
+#Check the library modules in RSaga
+rsaga.get.libraries()
+
+#which modules should be called out for geoprocessing
+rsaga.get.modules(lib ="ta_morphometry" )
+
+#Call out modules to use
+rsaga.get.usage (lib="io_gdal", module = 1)
+
+
+
+
+
+
+
+###IMPORT DEM to .sgrd_______________________________________________________________________________________________
+
+rsaga.geoprocessor("io_gdal", module = 0,
+                   param = list(
+                     FILES= dem.filepath,
+                     GRIDS= dem.sgrd.filepath ,
+                                RESAMPLING= 0 ))
+
+
+
+##CREATE INVERSE DEM____________________________________________________________________________________________
+
+rsaga.geoprocessor("grid_tools", module = 34,
+                   param = list(
+                     GRID= dem.sgrd.filepath ,
+                     INVERSE= "SGRDS/inverse_dem.sgrd"))
+                     
+
+
+
+
+###Slope, aspect, curvature__________________________________________________________________________________________________
+
+#Use Slope, Aspect, Curvature tool from SAGA on dem
+rsaga.slope.asp.curv(in.dem=dem.sgrd.filepath, 
+                     out.slope =  "SGRDS/slope.sgrd", 
+                     out.aspect= "SGRDS/aspect.sgrd",
+                     out.cgene =  "SGRDS/gen_curve.sgrd",
+                     out.cprof =   "SGRDS/prof.sgrd", 
+                     out.cplan =  "SGRDS/plan.sgrd", 
+                     out.ctang = "SGRDS/tang_curve.sgrd",
+                     method = "poly2zevenbergen")
+
+##Fill gaps for aspect output 
+####MAY HAVE TO ADJUST GROW FACTOR for this conversion and all the others
+#Use Close gaps with stepwise resampling ** Use grow factor of 1.4
+rsaga.geoprocessor("grid_tools", module = 29,
+                   param = list(
+                     INPUT= "SGRDS/aspect.sgrd",
+                     MASK = dem.sgrd.filepath,
+                     RESULT = "SGRDS/aspect.sgrd",
+                     RESAMPLING= 3,
+                     GROW= 1.2
+                   ))
+
+
+
+
+####MFD_catch_______________________________________________________________________________________________________________
+
+#need to use rsaga.geoprocessor and identify the library and the module #
+rsaga.geoprocessor("garden_learn_to_program", module = 7,
+                   param = list(ELEVATION= dem.sgrd.filepath,
+                                AREA= "SGRDS/MFD_catch.sgrd",
+                                METHOD= "MFD"))
+
+
+
+
+
+#### Flow Width, SCA_______________________________________________________________________________________________________
+
+rsaga.geoprocessor("ta_hydrology", module = 19, 
+                   param = list(
+                     DEM=dem.sgrd.filepath,
+                     WIDTH= "SGRDS/Flow_Width.sgrd",
+                     TCA= "SGRDS/MFD_catch.sgrd",
+                     SCA= "SGRDS/SCA.sgrd",
+                     METHOD=1))
+
+
+#Use Close gaps with stepwise resampling ** Use grow factor of 1.4
+rsaga.geoprocessor("grid_tools", module = 29,
+                   param = list(
+                     INPUT= "SGRDS/SCA.sgrd",
+                     MASK = dem.sgrd.filepath,
+                     RESULT = "SGRDS/SCA.sgrd",
+                     RESAMPLING= 3,
+                     GROW= 1.2
+                   ))
+
+
+
+
+
+#### LS_factor____________________________________________________________________________________________________________
+
+rsaga.geoprocessor("ta_hydrology", module = 22, 
+                   param = list(
+                     SLOPE = "SGRDS/slope.sgrd",
+                     AREA= "SGRDS/SCA.sgrd",
+                     LS= "SGRDS/LS_factor.sgrd",
+                     CONV=0,
+                     METHOD=0,
+                     STABILITY=0))
+
+#Use Close gaps with stepwise resampling ** Use grow factor of 1.4
+rsaga.geoprocessor("grid_tools", module = 29,
+                   param = list(
+                     INPUT= "SGRDS/LS_factor.sgrd",
+                     MASK = dem.sgrd.filepath,
+                     RESULT = "SGRDS/LS_factor.sgrd",
+                     RESAMPLING= 3,
+                     GROW= 1.2
+                   ))
+
+
+
+
+
+#### TWI_________________________________________________________________________________________________________________
+
+rsaga.geoprocessor("ta_hydrology", module = 20, 
+                   param = list(
+                     SLOPE= "SGRDS/slope.sgrd",
+                     AREA=  "SGRDS/SCA.sgrd",
+                     TWI=   "SGRDS/TWI.sgrd",
+                     CONV=0,
+                     METHOD=0       ))
+
+#Use Close gaps with stepwise resampling ** Use grow factor of 1.4
+rsaga.geoprocessor("grid_tools", module = 29, 
+                   param = list(
+                     INPUT=   "SGRDS/TWI.sgrd",
+                     MASK = dem.sgrd.filepath,
+                     RESULT = "SGRDS/TWI.sgrd",
+                     RESAMPLING= 3,
+                     GROW= 1.2
+                   ))
+
+
+
+
+
+#### SWI___________________________________________________________________________________________________________________
+rsaga.geoprocessor("ta_hydrology", module = 15,
+                   param = list(
+                     DEM=dem.sgrd.filepath,
+                     AREA=     "SGRDS/SWIcatch.sgrd",
+                     SLOPE=    "SGRDS/SWIslope.sgrd",
+                     AREA_MOD= "SGRDS/SWImodCA.sgrd",
+                     TWI=      "SGRDS/SWI.sgrd",
+                     AREA_TYPE=2,
+                     SLOPE_TYPE=1,
+                     SLOPE_WEIGHT=1
+                   ))
+
+
+
+
+
+#### Relative Heights and Slope Positions___________________________________________________________________________________
+rsaga.geoprocessor("ta_morphometry", module = 14,
+                   param = list(
+                     DEM=dem.sgrd.filepath,
+                     HO= "SGRDS/Slope_Height.sgrd",
+                     HU= "SGRDS/Valley_Depth.sgrd",
+                     NH= "SGRDS/Norm_Height.sgrd",
+                     SH= "SGRDS/Stand_Height.sgrd",
+                     MS= "SGRDS/MidSlope_Pos.sgrd"
+                   ))
+
+
+
+
+##### SDA__________________________________________________________________________________________________________________
+#####################
+##Inverse MFD_catch
+rsaga.geoprocessor("garden_learn_to_program", module = 7,  
+                   param = list(ELEVATION= "SGRDS/inverse_dem.sgrd",
+                                AREA=      "SGRDS/inverse_MFD_catch.sgrd",
+                                METHOD= "MFD"))
+
+##Inverse Flow width and SDA
+rsaga.geoprocessor("ta_hydrology", module = 19,  
+                   param = list(
+                     DEM=dem.sgrd.filepath,
+                     WIDTH= "SGRDS/inverse_Flow_Width.sgrd",
+                     TCA= "SGRDS/inverse_MFD_catch.sgrd",
+                     SCA= "SGRDS/SDA.sgrd",
+                     METHOD=1))
+
+
+#Use Close gaps with stepwise resampling ** Use grow factor of 1.4
+rsaga.geoprocessor("grid_tools", module = 29,  
+                   param = list(
+                     INPUT= "SGRDS/SDA.sgrd",
+                     MASK = dem.sgrd.filepath,
+                     RESULT = "SGRDS/SDA.sgrd",
+                     RESAMPLING= 3,
+                     GROW= 1.2
+                   ))
+
+
+
+
+### Terrain Ruggedness Index__________________________________________________________________________________________________
+rsaga.geoprocessor("ta_morphometry", module = 16,  
+                   param = list(
+                     DEM=dem.sgrd.filepath,
+                     TRI= "SGRDS/TRI.sgrd",
+                     DW_WEIGHTING=1
+                   ))
+
+
+
+####### Convergence Index____________________________________________________________________________________________________
+rsaga.geoprocessor("ta_morphometry", module = 1,  
+                   param = list(
+                     ELEVATION=dem.sgrd.filepath,
+                     RESULT= "SGRDS/Conv_I.sgrd",
+                     NEIGHBOURS=0
+                   ))
+
+
+
+
+###########   MRVBF MRRTF ___________________________________________________________________________________________________
+
+# Need to determine input for slope Threshold. 
+t_slope <- 116.57*res^-0.62
+
+#run
+rsaga.geoprocessor("ta_morphometry", module = 8,  
+                   param = list(
+                     DEM= dem.sgrd.filepath,
+                     MRVBF=  "SGRDS/MRVBF.sgrd",
+                     MRRTF=  "SGRDS/MRRTF.sgrd",
+                     T_SLOPE= t_slope,
+                     MAX_RES=100
+                   ))
+
+
+
+### MRVBF and MRRTF need to be masked with the dem 
+#Mask MRVBF
+rsaga.geoprocessor("grid_tools", module = 24,  
+                   param = list(
+                     GRID= "SGRDS/MRVBF.sgrd",
+                     MASK= dem.sgrd.filepath,
+                     MASKED= "SGRDS/MRVBF.sgrd"
+                   ))
+#Mask MRRTF
+rsaga.geoprocessor("grid_tools", module = 24,  
+                   param = list(
+                     GRID= "SGRDS/MRRTF.sgrd",
+                     MASK= dem.sgrd.filepath,
+                     MASKED= "SGRDS/MRRTF.sgrd"
+                   ))
+
+
+######## FINISH
+
+## delete any SGRDs that are not to be used as covariates 
+unlink("SGRDS/inverse_dem.sdat")
+unlink("SGRDS/SWIslope.sdat")
+unlink("SGRDS/inverse_Flow_Width.sdat")
+unlink("SGRDS/SWIcatch.sdat")
+unlink( "SGRDS/Flow_Width.sdat")
+unlink( "SGRDS/inverse_MFD_catch.sdat")
+unlink( "SGRDS/SWImodCA.sdat") 
+       
+
+
+
+#Open all .sgrd in SAGA and make sure they have the correct amount of NoData cells 
+
+## CONVERT ALL SGRDS TO TIFF  
+
+# CREATE A RASTER STACK OF THE COVARIATES WE JUST CREATED
+files <- list.files(path="SGRDS", pattern="*.sdat$", full.names=T, recursive=FALSE)
+sgrd_stack <- stack(files)
+sgrd_stack
+names(sgrd_stack)
+projection(sgrd_stack)
+
+# WRITE THE FILES IN THE RASTER STACK AS GEOTIFFS AND SAVE THEM TO THE TIFF FOLDER
+outName = paste("TIFFS/", names(sgrd_stack), '.tif', sep = "")
+outName
+writeRaster(sgrd_stack, filename = outName, format="GTiff", overwrite=TRUE, bylayer=TRUE)
+
+
+# SINCE RSAGA SAVES THE SGRDS TO THE COMPUTER, WE CAN NOW DELETE THEM SINCE THE TIFFS ARE CREATED
+unlink('SGRDS',recursive = TRUE)
+  
+# END 
+})
+}
+
+
+
+  
+
+  
+
+
+
+    ## SLEEP 
+### this command put the computer to sleep 
+library(installr)
+os.sleep(s=10, first_turn_hibernate_off = T)
+
+
+###this command will shut the computer down after the script has been run  
+system('shutdown -s')
+
+
+
