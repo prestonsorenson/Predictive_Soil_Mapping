@@ -1,0 +1,106 @@
+#load libraries
+library(terra)
+library(tidyterra)
+
+##wiebe 2007 method
+@article{wiebe2007application,
+  title={Application of a risk indicator for assessing trends in dryland salinization risk on the Canadian Prairies},
+  author={Wiebe, BH and Eilers, RG and Eilers, WD and Brierley, JA},
+  journal={Canadian Journal of Soil Science},
+  volume={87},
+  number={Special Issue},
+  pages={213--224},
+  year={2007},
+  publisher={NRC Research Press Ottawa, Canada}
+}
+#salinity -> moderate to severe salinity in the root zone
+#scores go from 1 to 10
+#EC salinity classes are 0-2 (N), 2-4 (W), 4-8 (M), 8-16 (S), and 16+  (V)
+#to avoid choppy boundaries, scores are assigned for continuously with an 0=0,  and EC=16 being 10 points
+
+#Slope classes are 0-3=5, 4-9 = 3, 10-15 =1, 16-30=1, 31-60=1, >60 = 0
+#in degrees that is: 0-1.7, 1.7-5.1, 5.1-8.5, 5.8-16.7, 16.7-30.9, 
+
+#drainage classes: excessive to well = 1, moderately well =3, imperfect = 8, poor = 10, very poor = 5
+
+#aridity: <200 = 1, 200=249 =2, 250-299 =3, 300-349 =5, 350-399=6, 400-449=7, 450-499=8, 500-549=9, >550=10
+
+#summer fallow adapted to a per pixel basis. Percent pixels with bare soil in growing season for last 10 years
+#0-10 =1, 10-20 =2, 20-30=3, 30-40=4, 40-50=5, 50-60=6, 60-70=7, 70-80=8, 80-90=9, 90-100=10
+
+#load rasters
+salinity=rast('/home/preston/OneDrive/Projects/Sask_Salinity_Mapping/Data/Salinity_Data/Salinity_45cm.tif')
+drainage=rast('/home/preston/OneDrive/Projects/Sask_Salinity_Mapping/Data/Drainage data/svm_drainage_map.tif')
+slope=rast('/home/preston/OneDrive/Projects/Sask_Salinity_Mapping/Data/slope.tif')
+precip=rast('/mnt/Elements/Saskatchewan/sk_era5_tp_median_250m/sk_era5_tp_median_250m.tif')
+cover=rast('/home/preston/OneDrive/Projects/Sask_Salinity_Mapping/Data/rh_bare_soil_count/rh_bare_soil_count_ndvi3_NDI70_nbr1-0000000000-0000000000.tif')[[34]]
+
+crs(salinity)=crs("EPSG:26913")
+crs(drainage)=crs("EPSG:26913")
+
+#resample all rasters
+slope=project(crop(slope, salinity), salinity)
+precip=project(crop(precip, salinity), salinity)
+cover=project(crop(cover, salinity), salinity)
+
+rast_stack=c(salinity, slope, drainage, precip, cover)
+
+#convert to data frame
+dat=as.data.frame(rast_stack, xy=TRUE)
+colnames(dat)=c('x', 'y','salinity', 'slope', 'drainage', 'precip', 'bare_soil_counts')
+dat=na.omit(dat)
+
+#relabel drainage to match Wiebe categories
+#needs to be modified to match range of values in input raster
+dat$drainage=ifelse(dat$drainage==1, 'poor', 
+                    ifelse(dat$drainage==2, 'very poor', 'well'))
+
+
+#calculate salinity score
+#scale linearly compared to max rating which is for EC of 16
+dat$salinity_score=(dat$salinity)/1.6
+dat$salinity_score[dat$salinity_score<1] <- 1
+dat$salinity_score[dat$salinity_score>10] <- 10
+
+#calculate drainage scores
+dat$drainage_score=ifelse(dat$drainage=='very poor', 5, 
+                          ifelse(dat$drainage=='poor', 10, 
+                                 ifelse(dat$drainage=='imperfect', 8, 
+                                        ifelse(dat$drainage=='moderately well', 3, 1))))
+
+#set scores for slope, converted from percent to degrees to match raster outputs
+a=c(0,1.7, 5.1, 5.8, 16.7, 30.9)
+b=c(5, 3, 1, 1, 1, 0)
+dat$slope_score=ifelse(dat$slope<1.7, 5, 
+                       ifelse(dat$slope<5.1, 3, 
+                              ifelse(dat$slope<30.9, 1, 0)))
+
+#calculate aridity score
+#scale to max value, and limits of 1 and 10
+dat$precip_score=(dat$precip/550)*10
+dat$precip_score[dat$precip_score<1] <- 1
+dat$precip_score[dat$precip_score>10] <- 10
+
+#calculate surface factor score
+#Percent pixels with bare soil in growing season
+dat$surface_factor_score=(dat$bare_soil_counts/5)*10
+dat$surface_factor_score[dat$surface_factor_score<1]=1
+dat$surface_factor_score[dat$surface_factor_score>10]=10
+
+#final score calculation
+dat$SRI=(dat$salinity_score*dat$slope_score*dat$drainage_score*dat$precip_score*dat$surface_factor_score)/100
+
+dat$rss_score=ifelse(dat$SRI<5, 'Very Low', 
+                     ifelse(dat$SRI<10, 'Low', 
+                            ifelse(dat$SRI<20, 'Moderate', 
+                                   ifelse(dat$SRI<40,'High', "Very High"))))
+
+dat$rss_score=factor(dat$rss_score, levels=c('Very Low', 'Low', 'Moderate', 'High', 'Very High'))
+
+
+#create raster and export
+sri=as_spatraster(dat, xycols=1:2, crs=crs('EPSG:26913'))
+
+
+setwd('/home/preston/OneDrive/Projects/Sask_Salinity_Mapping/Reporting/PSM_Maps')
+writeRaster(sri, 'riverhurst_salinity_risk_index.tif')
