@@ -36,4 +36,3 @@ mclapply(1:nrow(tiles), f, mc.cores=100)
 
 #return processing time and stop cluster
 proc.time()-start
-parallel::stopCluster(cls)
